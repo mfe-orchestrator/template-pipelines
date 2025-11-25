@@ -1,0 +1,45 @@
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+      - development
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+  - stage: Build
+    displayName: '🏗️ Build Vite.js Application'
+    jobs:
+      - job: BuildJob
+        displayName: '⚙️ Build and Test'
+        steps:
+          - task: NodeTool@0
+            displayName: '📦 Install Node.js'
+            inputs:
+              versionSpec: '24.x'
+
+          - script: npm install -g pnpm
+            displayName: '📦 Install pnpm'
+
+          - task: Cache@2
+            displayName: '💾 Cache node_modules'
+            inputs:
+              key: 'pnpm | "$(Agent.OS)" | pnpm-lock.yaml'
+              path: node_modules
+              restoreKeys: |
+                pnpm | "$(Agent.OS)"
+
+          - script: pnpm i
+            displayName: '📥 Install dependencies'
+
+          - script: pnpm build
+            displayName: '🔨 Build Vite project'
+
+          - task: PublishBuildArtifacts@1
+            displayName: '📤 Publish build artifacts'
+            inputs:
+              PathtoPublish: 'dist'
+              ArtifactName: 'vite-app'
+              publishLocation: 'Container'
