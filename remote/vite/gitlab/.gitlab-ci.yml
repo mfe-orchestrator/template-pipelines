@@ -1,0 +1,84 @@
+stages:
+  - install
+  - lint
+  - test
+  - build
+
+variables:
+  PNPM_VERSION: "9.15.0"
+  NODE_VERSION: "20"
+
+.pnpm_cache:
+  cache:
+    key:
+      files:
+        - pnpm-lock.yaml
+    paths:
+      - .pnpm-store
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - pnpm config set store-dir .pnpm-store
+    - pnpm install --frozen-lockfile
+
+install:
+  stage: install
+  image: node:${NODE_VERSION}
+  extends: .pnpm_cache
+  script:
+    - echo "Dependencies installed"
+  artifacts:
+    paths:
+      - node_modules/
+      - .pnpm-store
+    expire_in: 1 hour
+
+lint:
+  stage: lint
+  image: node:${NODE_VERSION}
+  extends: .pnpm_cache
+  dependencies:
+    - install
+  script:
+    - pnpm run lint
+  allow_failure: false
+
+test:
+  stage: test
+  image: node:${NODE_VERSION}
+  extends: .pnpm_cache
+  dependencies:
+    - install
+  script:
+    - pnpm run test
+  coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - coverage/junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura-coverage.xml
+    paths:
+      - coverage/
+    expire_in: 30 days
+  allow_failure: false
+
+build:
+  stage: build
+  image: node:${NODE_VERSION}
+  extends: .pnpm_cache
+  dependencies:
+    - install
+  script:
+    - pnpm run build
+    - echo "Build completed successfully"
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 7 days
+  only:
+    - main
+    - develop
+    - tags
