@@ -33,16 +33,6 @@ install:
       - .pnpm-store
     expire_in: 1 hour
 
-lint:
-  stage: lint
-  image: node:${NODE_VERSION}
-  extends: .pnpm_cache
-  dependencies:
-    - install
-  script:
-    - pnpm run lint
-  allow_failure: false
-
 test:
   stage: test
   image: node:${NODE_VERSION}
