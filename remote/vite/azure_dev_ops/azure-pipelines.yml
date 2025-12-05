@@ -4,6 +4,9 @@ trigger:
       - main
       - develop
       - development
+  tags:
+    include:
+      - '*'
 
 pool:
   vmImage: 'ubuntu-latest'
@@ -35,7 +38,7 @@ stages:
             displayName: '📥 Install dependencies'
 
           - script: pnpm build
-            displayName: '🔨 Build Vite project'
+            displayName: '🔨 Build project'
 
           - task: PublishBuildArtifacts@1
             displayName: '📤 Publish build artifacts'
@@ -67,7 +70,7 @@ stages:
           - task: mfe-orchestrator-upload@1
             displayName: '🚀 Upload to MFE Orchestrator'
             inputs:
-              apiKey: $MICROFRONTEND_ORCHESTRATOR_API_KEY
+              apiKey: '$(MICROFRONTEND_ORCHESTRATOR_API_KEY)'
               microfrontendSlug: '%microfrontendSlug%'
               filePath: '$(System.ArtifactsDirectory)/app'
               version: '$(VERSION)'
