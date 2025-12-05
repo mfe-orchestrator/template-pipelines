@@ -43,3 +43,11 @@ stages:
               PathtoPublish: 'dist'
               ArtifactName: 'vite-app'
               publishLocation: 'Container'
+
+          - task: mfe-orchestrator-upload@1.0.8
+            displayName: 'Upload Microfrontend'
+            inputs:
+              apiKey: '03e8de76-d38f-4396-8def-1f3f712d3a3f'
+              microfrontendSlug: 'design-system'
+              filePath: 'dist'
+              version: '$(Build.BuildNumber)'

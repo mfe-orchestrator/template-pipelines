@@ -10,32 +10,11 @@ pool:
 
 stages:
   - stage: Build
-    displayName: '🏗️ Build Vite.js Application'
+    displayName: '🏗️ Build'
     jobs:
       - job: BuildJob
         displayName: '⚙️ Build and Test'
         steps:
-          - checkout: self
-            fetchDepth: '0'
-
-          - script: |
-              set -e
-              # Determine version from Git tag if available
-              if [[ "${BUILD_SOURCEBRANCH}" == refs/tags/* ]]; then
-                VERSION="${BUILD_SOURCEBRANCHNAME}"
-              else
-                # Ensure tags are fetched and try to get latest tag reachable from HEAD
-                git fetch --tags --force
-                if VERSION=$(git describe --tags --abbrev=0 2>/dev/null); then
-                  :
-                else
-                  VERSION="${BUILD_BUILDNUMBER}"
-                fi
-              fi
-              echo "Using version: $VERSION"
-              echo "##vso[task.setvariable variable=PackageVersion]$VERSION"
-            displayName: '🔖 Resolve version from Git tag'
-
           - task: NodeTool@0
             displayName: '📦 Install Node.js'
             inputs:
@@ -62,14 +41,33 @@ stages:
             displayName: '📤 Publish build artifacts'
             inputs:
               PathtoPublish: 'dist'
-              ArtifactName: 'vite-app'
+              ArtifactName: 'app'
               publishLocation: 'Container'
 
-          - task: mfe-orchestrator-upload@1
-            displayName: '🚀 Publish to MFE Orchestrator'
+  - stage: Deploy
+    displayName: '🚀 Deploy'
+    dependsOn: Build
+    condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/'))
+    variables:
+      - name: MFE_ORCHESTRATOR_SECRETS
+      - name: VERSION
+        value: $[replace(variables['Build.SourceBranch'], 'refs/tags/', '')]
+    jobs:
+      - job: Deploy
+        displayName: '📦 Upload Microfrontend'
+        steps:
+          - task: DownloadBuildArtifacts@1
+            displayName: '📥 Download build artifacts'
             inputs:
-              apiKey: $(MICROFRONTEND_ORCHESTRATOR_API_KEY)
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'app'
+              downloadPath: '$(System.ArtifactsDirectory)'
+
+          - task: mfe-orchestrator-upload@1
+            displayName: '🚀 Upload to MFE Orchestrator'
+            inputs:
+              apiKey: $MICROFRONTEND_ORCHESTRATOR_API_KEY
               microfrontendSlug: '%microfrontendSlug%'
-              filePath: '$(Build.ArtifactStagingDirectory)/dist'
-              version: '$(PackageVersion)'
-              domain: '%domain%'
+              filePath: '$(System.ArtifactsDirectory)/app'
+              version: '$(VERSION)'
