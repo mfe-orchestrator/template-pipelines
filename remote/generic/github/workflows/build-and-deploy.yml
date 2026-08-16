@@ -65,6 +65,6 @@ jobs:
       with:
         apikey: ${{ secrets.MICROFRONTEND_ORCHESTRATOR_API_KEY }}
         microfrontend-slug: %microfrontendSlug%
-        domain: %domain%
+        domain: ${{ vars.MICROFRONTEND_ORCHESTRATOR_DOMAIN || '%domain%' }}
         file-path: './dist'
         version: ${{ inputs.version || github.ref_name }}

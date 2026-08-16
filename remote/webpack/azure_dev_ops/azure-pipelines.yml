@@ -8,6 +8,10 @@ trigger:
 pool:
   vmImage: 'ubuntu-latest'
 
+variables:
+  - name: MICROFRONTEND_ORCHESTRATOR_DOMAIN_RESOLVED
+    value: $[coalesce(variables['MICROFRONTEND_ORCHESTRATOR_DOMAIN'], '%domain%')]
+
 stages:
   - stage: Build
     displayName: '🏗️ Build Vite.js Application'
@@ -72,4 +76,4 @@ stages:
               microfrontendSlug: '%microfrontendSlug%'
               filePath: '$(Build.ArtifactStagingDirectory)/dist'
               version: '$(PackageVersion)'
-              domain: '%domain%'
+              domain: '$(MICROFRONTEND_ORCHESTRATOR_DOMAIN_RESOLVED)'

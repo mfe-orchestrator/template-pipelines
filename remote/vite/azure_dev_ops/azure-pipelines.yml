@@ -55,6 +55,8 @@ stages:
       - group: MFE_ORCHESTRATOR_SECRETS
       - name: VERSION
         value: $[replace(variables['Build.SourceBranch'], 'refs/tags/', '')]
+      - name: MICROFRONTEND_ORCHESTRATOR_DOMAIN_RESOLVED
+        value: $[coalesce(variables['MICROFRONTEND_ORCHESTRATOR_DOMAIN'], '%domain%')]
     jobs:
       - job: Deploy
         displayName: '📦 Upload Microfrontend'
@@ -74,3 +76,4 @@ stages:
               microfrontendSlug: '%microfrontendSlug%'
               filePath: '$(System.ArtifactsDirectory)/app'
               version: '$(VERSION)'
+              domain: '$(MICROFRONTEND_ORCHESTRATOR_DOMAIN_RESOLVED)'
