@@ -23,8 +23,8 @@ stages:
             inputs:
               versionSpec: '24.x'
 
-          - script: npm install -g pnpm
-            displayName: '📦 Install pnpm'
+          - script: corepack enable
+            displayName: '📦 Enable pnpm (corepack)'
 
           - task: Cache@2
             displayName: '💾 Cache node_modules'
@@ -40,12 +40,11 @@ stages:
           - script: pnpm build
             displayName: '🔨 Build project'
 
-          - task: PublishBuildArtifacts@1
+          - task: PublishPipelineArtifact@1
             displayName: '📤 Publish build artifacts'
             inputs:
-              PathtoPublish: 'dist'
-              ArtifactName: 'app'
-              publishLocation: 'Container'
+              targetPath: 'dist'
+              artifact: 'app'
 
   - stage: Deploy
     displayName: '🚀 Deploy'

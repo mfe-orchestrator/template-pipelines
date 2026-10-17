@@ -16,22 +16,20 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
     
     - name: 🔄 Setup pnpm
-      uses: pnpm/action-setup@v4
-      with:
-        version: 10
+      uses: pnpm/action-setup@v6
     
     - name: ⚙️ Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
-        node-version: '23.11.1'
+        node-version: '24'
         cache: 'pnpm'
         cache-dependency-path: '**/pnpm-lock.yaml'
     
     - name: 💾 Cache pnpm store
-      uses: actions/cache@v3
+      uses: actions/cache@v6
       id: pnpm-cache
       with:
         path: |
@@ -42,7 +40,7 @@ jobs:
           ${{ runner.os }}-pnpm-store-
     
     - name: 📦 Cache dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v6
       id: cache-deps
       with:
         path: |
