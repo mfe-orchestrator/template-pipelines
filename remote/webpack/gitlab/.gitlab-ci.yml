@@ -6,8 +6,7 @@ stages:
   - deploy
 
 variables:
-  PNPM_VERSION: "9.15.0"
-  NODE_VERSION: "20"
+  NODE_VERSION: "24"
 
 .pnpm_cache:
   cache:
@@ -18,7 +17,6 @@ variables:
       - .pnpm-store
   before_script:
     - corepack enable
-    - corepack prepare pnpm@${PNPM_VERSION} --activate
     - pnpm config set store-dir .pnpm-store
     - pnpm install --frozen-lockfile
 

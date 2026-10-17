@@ -20,8 +20,8 @@ stages:
             inputs:
               versionSpec: '24.x'
 
-          - script: npm install -g pnpm
-            displayName: '📦 Install pnpm'
+          - script: corepack enable
+            displayName: '📦 Enable pnpm (corepack)'
 
           - task: Cache@2
             displayName: '💾 Cache node_modules'
