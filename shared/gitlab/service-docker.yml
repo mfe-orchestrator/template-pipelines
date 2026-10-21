@@ -1,0 +1,57 @@
+# Included by the pipeline of a service repository, see shared/README.md:
+#
+#   include:
+#     - remote: https://raw.githubusercontent.com/mfe-orchestrator/template-pipelines/main/shared/gitlab/service-docker.yml
+#
+# Two hidden jobs:
+#   .mfe-register-service-version   script only, to reuse with !reference in a release job of your own
+#   .mfe-service-docker-release     docker build + push to the GitLab registry + registration, to extend
+#
+# Variables read (set them on the job, or as CI/CD variables):
+#   MFE_SERVICE_SLUG                     slug of the service in the console (required)
+#   MICROFRONTEND_ORCHESTRATOR_DOMAIN    base URL of the console, without /api (required)
+#   MICROFRONTEND_ORCHESTRATOR_API_KEY   deploy API key of the project (masked CI/CD variable)
+#   MFE_IMAGE                            image reference with tag; $CI_REGISTRY_IMAGE:$MFE_VERSION by default
+#   MFE_VERSION                          version registered; $CI_COMMIT_TAG by default
+#   MFE_IMAGE_DIGEST                     image digest, optional
+
+.mfe-register-service-version:
+  script:
+    # No set -u: the script runs inside the release job of the caller, whose own lines may read unset variables
+    - |
+      MFE_VERSION="${MFE_VERSION:-${CI_COMMIT_TAG:-}}"
+      for name in MFE_SERVICE_SLUG MICROFRONTEND_ORCHESTRATOR_DOMAIN MICROFRONTEND_ORCHESTRATOR_API_KEY MFE_IMAGE MFE_VERSION; do
+        eval "value=\${$name:-}"
+        if [ -z "$value" ]; then echo "$name is empty"; exit 1; fi
+      done
+      command -v curl >/dev/null 2>&1 || apk add --no-cache curl >/dev/null
+      BODY="{\"image\":\"${MFE_IMAGE}\",\"commitSha\":\"${CI_COMMIT_SHA}\""
+      if [ -n "${MFE_IMAGE_DIGEST:-}" ]; then BODY="${BODY},\"digest\":\"${MFE_IMAGE_DIGEST}\""; fi
+      BODY="${BODY}}"
+      curl --fail-with-body --show-error --silent -X POST \
+        -H "api-key: ${MICROFRONTEND_ORCHESTRATOR_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "$BODY" \
+        "${MICROFRONTEND_ORCHESTRATOR_DOMAIN%/}/api/services/by-slug/${MFE_SERVICE_SLUG}/versions/${MFE_VERSION}"
+      echo
+      echo "registered ${MFE_SERVICE_SLUG} ${MFE_VERSION}"
+
+.mfe-service-docker-release:
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    MFE_DOCKERFILE: Dockerfile
+    MFE_DOCKER_CONTEXT: .
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  script:
+    - export MFE_VERSION="${MFE_VERSION:-$CI_COMMIT_TAG}"
+    - export MFE_IMAGE="${MFE_IMAGE:-$CI_REGISTRY_IMAGE:$MFE_VERSION}"
+    - docker build -f "$MFE_DOCKERFILE" -t "$MFE_IMAGE" "$MFE_DOCKER_CONTEXT"
+    - docker push "$MFE_IMAGE"
+    - export MFE_IMAGE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$MFE_IMAGE" | cut -d@ -f2)
+    - !reference [.mfe-register-service-version, script]
+  rules:
+    - if: $CI_COMMIT_TAG

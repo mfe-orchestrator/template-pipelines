@@ -1,0 +1,46 @@
+# Steps template: registers a pushed image as a version of a service in MFE Orchestrator. See shared/README.md
+parameters:
+  - name: serviceSlug
+    type: string
+  - name: image
+    type: string
+  - name: version
+    type: string
+  - name: orchestratorDomain
+    type: string
+  - name: apiKey
+    type: string
+    default: $(MICROFRONTEND_ORCHESTRATOR_API_KEY)
+  - name: digest
+    type: string
+    default: ''
+  - name: commitSha
+    type: string
+    default: $(Build.SourceVersion)
+
+steps:
+  # Values reach the script through env only: a $(…) macro pasted into the script body is substituted as
+  # text before bash runs, so a tag could inject shell
+  - script: |
+      set -euo pipefail
+      for name in SERVICE_SLUG IMAGE VERSION DOMAIN MFE_API_KEY; do
+        if [ -z "${!name}" ]; then echo "##vso[task.logissue type=error]${name} is empty"; exit 1; fi
+      done
+      BODY=$(jq -n --arg image "$IMAGE" --arg digest "$DIGEST" --arg commitSha "$COMMIT_SHA" \
+        '{image: $image} + (if $digest != "" then {digest: $digest} else {} end) + (if $commitSha != "" then {commitSha: $commitSha} else {} end)')
+      curl --fail-with-body --show-error --silent -X POST \
+        -H "api-key: ${MFE_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "$BODY" \
+        "${DOMAIN%/}/api/services/by-slug/${SERVICE_SLUG}/versions/${VERSION}"
+      echo
+      echo "registered ${SERVICE_SLUG} ${VERSION}"
+    displayName: 'Register version in MFE Orchestrator'
+    env:
+      SERVICE_SLUG: ${{ parameters.serviceSlug }}
+      IMAGE: ${{ parameters.image }}
+      VERSION: ${{ parameters.version }}
+      DOMAIN: ${{ parameters.orchestratorDomain }}
+      MFE_API_KEY: ${{ parameters.apiKey }}
+      DIGEST: ${{ parameters.digest }}
+      COMMIT_SHA: ${{ parameters.commitSha }}

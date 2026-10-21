@@ -1,0 +1,51 @@
+# Steps template: builds and pushes the Docker image of a service, then registers it as a version in
+# MFE Orchestrator. See shared/README.md
+parameters:
+  - name: serviceSlug
+    type: string
+  - name: orchestratorDomain
+    type: string
+  # Name of the Docker registry service connection
+  - name: containerRegistry
+    type: string
+  # Repository path inside the registry (e.g. acme/orders-be)
+  - name: repository
+    type: string
+  # Registry host prepended to the image reference sent to the console (e.g. acme.azurecr.io)
+  - name: registryHost
+    type: string
+    default: ''
+  - name: version
+    type: string
+    default: $(Build.SourceBranchName)
+  - name: dockerfile
+    type: string
+    default: Dockerfile
+  - name: buildContext
+    type: string
+    default: .
+  - name: apiKey
+    type: string
+    default: $(MICROFRONTEND_ORCHESTRATOR_API_KEY)
+
+steps:
+  - task: Docker@2
+    displayName: 'Build and push image'
+    inputs:
+      command: buildAndPush
+      containerRegistry: ${{ parameters.containerRegistry }}
+      repository: ${{ parameters.repository }}
+      Dockerfile: ${{ parameters.dockerfile }}
+      buildContext: ${{ parameters.buildContext }}
+      tags: ${{ parameters.version }}
+
+  - template: register-service-version.yml
+    parameters:
+      serviceSlug: ${{ parameters.serviceSlug }}
+      orchestratorDomain: ${{ parameters.orchestratorDomain }}
+      apiKey: ${{ parameters.apiKey }}
+      version: ${{ parameters.version }}
+      ${{ if ne(parameters.registryHost, '') }}:
+        image: ${{ parameters.registryHost }}/${{ parameters.repository }}:${{ parameters.version }}
+      ${{ else }}:
+        image: ${{ parameters.repository }}:${{ parameters.version }}
