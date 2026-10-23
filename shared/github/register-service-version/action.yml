@@ -1,0 +1,58 @@
+name: Register service version
+description: Registers a pushed image as a version of a service in MFE Orchestrator
+
+inputs:
+  service-slug:
+    description: Slug of the service in the console
+    required: true
+  image:
+    description: Full image reference, tag included (e.g. ghcr.io/acme/orders-be:1.2.0)
+    required: true
+  api-key:
+    description: Deploy API key of the project (MANAGER role), usually secrets.MICROFRONTEND_ORCHESTRATOR_API_KEY
+    required: true
+  orchestrator-domain:
+    description: Base URL of the console, without /api
+    required: true
+  version:
+    description: Version to register; the tag or branch that triggered the run when left out
+    required: false
+    default: ${{ github.ref_name }}
+  digest:
+    description: Image digest (sha256:...), optional
+    required: false
+    default: ""
+  commit-sha:
+    description: Commit the image was built from
+    required: false
+    default: ${{ github.sha }}
+
+runs:
+  using: composite
+  steps:
+    # Inputs reach the script through env only: an expression pasted into the script body is substituted as
+    # text before bash runs, so a tag name could inject shell
+    - name: Register version in MFE Orchestrator
+      shell: bash
+      env:
+        MFE_SERVICE_SLUG: ${{ inputs.service-slug }}
+        MFE_IMAGE: ${{ inputs.image }}
+        MFE_API_KEY: ${{ inputs.api-key }}
+        MFE_DOMAIN: ${{ inputs.orchestrator-domain }}
+        MFE_VERSION: ${{ inputs.version }}
+        MFE_DIGEST: ${{ inputs.digest }}
+        MFE_COMMIT_SHA: ${{ inputs.commit-sha }}
+      run: |
+        set -euo pipefail
+        for name in MFE_SERVICE_SLUG MFE_IMAGE MFE_API_KEY MFE_DOMAIN MFE_VERSION; do
+          if [ -z "${!name}" ]; then echo "::error::${name} is empty"; exit 1; fi
+        done
+        BODY=$(jq -n --arg image "$MFE_IMAGE" --arg digest "$MFE_DIGEST" --arg commitSha "$MFE_COMMIT_SHA" \
+          '{image: $image} + (if $digest != "" then {digest: $digest} else {} end) + (if $commitSha != "" then {commitSha: $commitSha} else {} end)')
+        curl --fail-with-body --show-error --silent -X POST \
+          -H "api-key: ${MFE_API_KEY}" \
+          -H "Content-Type: application/json" \
+          -d "$BODY" \
+          "${MFE_DOMAIN%/}/api/services/by-slug/${MFE_SERVICE_SLUG}/versions/${MFE_VERSION}"
+        echo
+        echo "registered ${MFE_SERVICE_SLUG} ${MFE_VERSION}"

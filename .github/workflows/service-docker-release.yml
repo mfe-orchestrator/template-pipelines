@@ -1,0 +1,116 @@
+name: Service Docker release
+
+# Reusable: builds the Docker image of a service, pushes it and registers it as a version in MFE Orchestrator.
+# Called from the pipeline of a service repository, see shared/README.md
+
+on:
+  workflow_call:
+    inputs:
+      service-slug:
+        description: Slug of the service in the console
+        type: string
+        required: true
+      orchestrator-domain:
+        description: Base URL of the console, without /api
+        type: string
+        required: true
+      registry:
+        description: Registry host
+        type: string
+        default: ghcr.io
+      image:
+        description: Image repository without tag; ghcr.io/<owner>/<repo> when left out
+        type: string
+        default: ""
+      version:
+        description: Tag of the image and version registered; the git ref that triggered the run when left out
+        type: string
+        default: ""
+      context:
+        description: Docker build context
+        type: string
+        default: .
+      dockerfile:
+        description: Path of the Dockerfile
+        type: string
+        default: Dockerfile
+      platforms:
+        description: Target platforms
+        type: string
+        default: linux/amd64
+      build-args:
+        description: Build arguments, one KEY=value per line
+        type: string
+        default: ""
+    secrets:
+      api-key:
+        description: Deploy API key of the project, usually MICROFRONTEND_ORCHESTRATOR_API_KEY
+        required: true
+      registry-username:
+        description: Registry user; github.actor when left out
+        required: false
+      registry-password:
+        description: Registry password or token; GITHUB_TOKEN when left out
+        required: false
+    outputs:
+      image:
+        description: Image reference pushed, tag included
+        value: ${{ jobs.release.outputs.image }}
+      digest:
+        description: Digest of the image pushed
+        value: ${{ jobs.release.outputs.digest }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.ref.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image reference
+        id: ref
+        env:
+          INPUT_IMAGE: ${{ inputs.image }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          IMAGE="${INPUT_IMAGE:-ghcr.io/${GITHUB_REPOSITORY,,}}"
+          VERSION="${INPUT_VERSION:-$GITHUB_REF_NAME}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE}:${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+        if: contains(inputs.platforms, ',')
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.registry-username || github.actor }}
+          password: ${{ secrets.registry-password || github.token }}
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          platforms: ${{ inputs.platforms }}
+          build-args: ${{ inputs.build-args }}
+          push: true
+          tags: ${{ steps.ref.outputs.image }}
+
+      - uses: mfe-orchestrator/template-pipelines/shared/github/register-service-version@main
+        with:
+          service-slug: ${{ inputs.service-slug }}
+          orchestrator-domain: ${{ inputs.orchestrator-domain }}
+          api-key: ${{ secrets.api-key }}
+          image: ${{ steps.ref.outputs.image }}
+          version: ${{ steps.ref.outputs.version }}
+          digest: ${{ steps.build.outputs.digest }}
