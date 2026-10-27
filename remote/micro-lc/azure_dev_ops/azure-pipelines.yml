@@ -75,7 +75,7 @@ stages:
           - task: mfe-orchestrator-upload@1
             displayName: '🚀 Upload to MFE Orchestrator'
             inputs:
-              apiKey: '$(MICROFRONTEND_ORCHESTRATOR_API_KEY)'
+              apiKey: '$(FLIGHTROOM_API_KEY)'
               microfrontendSlug: '%microfrontendSlug%'
               filePath: '$(Pipeline.Workspace)/app'
               version: '$(VERSION)'

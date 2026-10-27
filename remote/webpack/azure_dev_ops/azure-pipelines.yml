@@ -71,7 +71,7 @@ stages:
           - task: mfe-orchestrator-upload@1
             displayName: '🚀 Publish to MFE Orchestrator'
             inputs:
-              apiKey: $(MICROFRONTEND_ORCHESTRATOR_API_KEY)
+              apiKey: $(FLIGHTROOM_API_KEY)
               microfrontendSlug: '%microfrontendSlug%'
               filePath: '$(Build.ArtifactStagingDirectory)/dist'
               version: '$(PackageVersion)'
