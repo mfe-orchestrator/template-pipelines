@@ -68,7 +68,7 @@ stages:
               targetPath: 'dist'
               artifact: 'vite-app'
 
-          - task: mfe-orchestrator-upload@1
+          - task: flightroom-upload@1
             displayName: '🚀 Publish to MFE Orchestrator'
             inputs:
               apiKey: $(MICROFRONTEND_ORCHESTRATOR_API_KEY)
