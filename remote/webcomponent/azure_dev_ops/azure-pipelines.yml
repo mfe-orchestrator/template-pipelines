@@ -1,0 +1,84 @@
+# Needs the variable group MFE_ORCHESTRATOR_SECRETS (FLIGHTROOM_API_KEY, created by the console) and the
+# Flightroom extension of Azure DevOps (task flightroom-upload@1). Optional pipeline variable:
+#   MICROFRONTEND_ORCHESTRATOR_DOMAIN   console base URL, defaults to %domain%
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+      - development
+  tags:
+    include:
+      - '*'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+  - stage: Build
+    displayName: '🏗️ Build'
+    jobs:
+      - job: BuildJob
+        displayName: '⚙️ Build webcomponent remote'
+        steps:
+          - task: NodeTool@0
+            displayName: '📦 Install Node.js'
+            inputs:
+              versionSpec: '24.x'
+
+          # pnpm comes from the packageManager field of package.json
+          - script: corepack enable
+            displayName: '📦 Enable pnpm (corepack)'
+
+          - script: pnpm config set store-dir $(Pipeline.Workspace)/.pnpm-store
+            displayName: '⚙️ Set the pnpm store'
+
+          - task: Cache@2
+            displayName: '💾 Cache the pnpm store'
+            inputs:
+              key: 'pnpm | "$(Agent.OS)" | pnpm-lock.yaml'
+              path: $(Pipeline.Workspace)/.pnpm-store
+              restoreKeys: |
+                pnpm | "$(Agent.OS)"
+
+          - script: pnpm install --frozen-lockfile
+            displayName: '📥 Install dependencies'
+
+          - script: pnpm build
+            displayName: '🔨 Build project'
+
+          - task: PublishPipelineArtifact@1
+            displayName: '📤 Publish build artifacts'
+            inputs:
+              targetPath: 'dist'
+              artifact: 'app'
+
+  - stage: Deploy
+    displayName: '🚀 Deploy'
+    dependsOn: Build
+    condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/'))
+    variables:
+      - group: MFE_ORCHESTRATOR_SECRETS
+      - name: VERSION
+        value: $[replace(variables['Build.SourceBranch'], 'refs/tags/', '')]
+      - name: MICROFRONTEND_ORCHESTRATOR_DOMAIN_RESOLVED
+        value: $[coalesce(variables['MICROFRONTEND_ORCHESTRATOR_DOMAIN'], '%domain%')]
+    jobs:
+      - job: Deploy
+        displayName: '📦 Upload Microfrontend'
+        steps:
+          - checkout: none
+
+          # The pair of PublishPipelineArtifact: lands in $(Pipeline.Workspace)/app
+          - download: current
+            displayName: '📥 Download build artifacts'
+            artifact: 'app'
+
+          - task: flightroom-upload@1
+            displayName: '🚀 Upload to MFE Orchestrator'
+            inputs:
+              apiKey: '$(FLIGHTROOM_API_KEY)'
+              microfrontendSlug: '%microfrontendSlug%'
+              filePath: '$(Pipeline.Workspace)/app'
+              version: '$(VERSION)'
+              domain: '$(MICROFRONTEND_ORCHESTRATOR_DOMAIN_RESOLVED)'

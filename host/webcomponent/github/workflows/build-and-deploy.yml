@@ -1,0 +1,92 @@
+name: 🚀 Build and deploy
+
+on:
+  push:
+    tags:
+      - '*'
+
+  workflow_dispatch:
+    inputs:
+      version:
+        required: true
+        type: string
+        description: 'Version to release'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      # Through env only: the version is a tag name or a typed input, never pasted into a script body
+      VERSION: ${{ inputs.version || github.ref_name }}
+    steps:
+    - uses: actions/checkout@v7
+
+    # pnpm comes from the packageManager field of package.json
+    - name: 🔄 Setup pnpm
+      uses: pnpm/action-setup@v6
+
+    - name: ⚙️ Setup Node.js
+      uses: actions/setup-node@v7
+      with:
+        node-version: '24'
+        cache: 'pnpm'
+        cache-dependency-path: '**/pnpm-lock.yaml'
+
+    - name: 🔧 Install Dependencies
+      run: pnpm install --frozen-lockfile
+
+    # The host reads these at build time (see .env.example). Set them as repository
+    # variables: VITE_MFE_PROJECT_ID is required, the backend url defaults to this console,
+    # VITE_MFE_ENVIRONMENT is optional (left empty, the backend resolves the environment
+    # from the domain the host is served on).
+
+    - name: 🏗️ Build
+      run: pnpm build
+      env:
+        VITE_MFE_BACKEND_URL: ${{ vars.VITE_MFE_BACKEND_URL || '%domain%/api' }}
+        VITE_MFE_PROJECT_ID: ${{ vars.VITE_MFE_PROJECT_ID }}
+        VITE_MFE_ENVIRONMENT: ${{ vars.VITE_MFE_ENVIRONMENT }}
+
+    # The image reference: registry host + repository (lowercase, as Docker wants it) + tag
+    - name: 🏷️ Compute image name
+      run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+    - name: 🐳 Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: 🔑 Login to GitHub Container Registry
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    # The Dockerfile serves dist/ with nginx, non-root, on port 8080
+    - name: 🚢 Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        push: true
+        platforms: linux/amd64,linux/arm64
+        tags: ${{ env.IMAGE }}:${{ env.VERSION }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    # A host is a DOCKER frontend: the console learns about a version from this call, not from an upload.
+    # Secret FLIGHTROOM_API_KEY is created by the console in this repository.
+    # Variable MICROFRONTEND_ORCHESTRATOR_DOMAIN (optional) points it at another installation.
+    - name: 📝 Register version in MFE Orchestrator
+      env:
+        MFE_API_KEY: ${{ secrets.FLIGHTROOM_API_KEY }}
+        MFE_DOMAIN: ${{ vars.MICROFRONTEND_ORCHESTRATOR_DOMAIN || '%domain%' }}
+        DIGEST: ${{ steps.build.outputs.digest }}
+      run: |
+        curl --fail-with-body --show-error --silent -X POST \
+          -H "api-key: ${MFE_API_KEY}" \
+          -H "Content-Type: application/json" \
+          -d "{\"image\":\"${IMAGE}:${VERSION}\",\"digest\":\"${DIGEST}\",\"commitSha\":\"${GITHUB_SHA}\"}" \
+          "${MFE_DOMAIN%/}/api/frontends/by-slug/%microfrontendSlug%/versions/${VERSION}"

@@ -1,0 +1,133 @@
+# Needs the variable group MFE_ORCHESTRATOR_SECRETS (FLIGHTROOM_API_KEY, created by the console) and:
+#   MFE_ORCHESTRATOR_REGISTRY_CONNECTION  name of the Docker registry service connection
+#   MFE_ORCHESTRATOR_IMAGE_REPOSITORY     repository path inside the registry (e.g. my-org/%microfrontendSlug%)
+#   MFE_PROJECT_ID                       id of the project in the console (required)
+#   MFE_BACKEND_URL / MFE_ENVIRONMENT     optional, see below
+# Optional:
+#   MFE_ORCHESTRATOR_REGISTRY_HOST        registry host prepended to the image reference sent to the console (e.g. myregistry.azurecr.io)
+#   MICROFRONTEND_ORCHESTRATOR_DOMAIN     console base URL, defaults to %domain%
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+      - development
+  tags:
+    include:
+      - '*'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  # The webpack host reads (DefinePlugin) these at build time (see .env.example). Define them as
+  # pipeline variables: MFE_PROJECT_ID is required, the backend url defaults
+  # to this console, MFE_ENVIRONMENT is optional (left empty, the backend
+  # resolves the environment from the domain the host is served on).
+  - name: MFE_BACKEND_URL_RESOLVED
+    value: $[coalesce(variables['MFE_BACKEND_URL'], '%domain%/api')]
+  - name: MFE_PROJECT_ID_RESOLVED
+    value: $[coalesce(variables['MFE_PROJECT_ID'], '')]
+  - name: MFE_ENVIRONMENT_RESOLVED
+    value: $[coalesce(variables['MFE_ENVIRONMENT'], '')]
+
+stages:
+  - stage: Build
+    displayName: '🏗️ Build'
+    jobs:
+      - job: BuildJob
+        displayName: '⚙️ Build webpack host'
+        steps:
+          - task: NodeTool@0
+            displayName: '📦 Install Node.js'
+            inputs:
+              versionSpec: '24.x'
+
+          # pnpm comes from the packageManager field of package.json
+          - script: corepack enable
+            displayName: '📦 Enable pnpm (corepack)'
+
+          - script: pnpm config set store-dir $(Pipeline.Workspace)/.pnpm-store
+            displayName: '⚙️ Set the pnpm store'
+
+          - task: Cache@2
+            displayName: '💾 Cache the pnpm store'
+            inputs:
+              key: 'pnpm | "$(Agent.OS)" | pnpm-lock.yaml'
+              path: $(Pipeline.Workspace)/.pnpm-store
+              restoreKeys: |
+                pnpm | "$(Agent.OS)"
+
+          - script: pnpm install --frozen-lockfile
+            displayName: '📥 Install dependencies'
+
+          - script: pnpm build
+            displayName: '🔨 Build project'
+            env:
+              MFE_BACKEND_URL: $(MFE_BACKEND_URL_RESOLVED)
+              MFE_PROJECT_ID: $(MFE_PROJECT_ID_RESOLVED)
+              MFE_ENVIRONMENT: $(MFE_ENVIRONMENT_RESOLVED)
+
+          - task: PublishPipelineArtifact@1
+            displayName: '📤 Publish the build'
+            inputs:
+              targetPath: 'dist'
+              artifact: 'dist'
+
+  - stage: Release
+    displayName: '🚀 Release'
+    dependsOn: Build
+    condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/'))
+    variables:
+      - group: MFE_ORCHESTRATOR_SECRETS
+      - name: VERSION
+        value: $[replace(variables['Build.SourceBranch'], 'refs/tags/', '')]
+      - name: MICROFRONTEND_ORCHESTRATOR_DOMAIN_RESOLVED
+        value: $[coalesce(variables['MICROFRONTEND_ORCHESTRATOR_DOMAIN'], '%domain%')]
+      # Empty unless set: declaring MFE_ORCHESTRATOR_REGISTRY_HOST itself here would shadow a value
+      # set in the pipeline settings, since YAML variables take precedence over those
+      - name: MFE_ORCHESTRATOR_REGISTRY_HOST_RESOLVED
+        value: $[coalesce(variables['MFE_ORCHESTRATOR_REGISTRY_HOST'], '')]
+    jobs:
+      - job: Release
+        displayName: '🐳 Docker build, push and register'
+        steps:
+          # The Dockerfile copies dist/: put the build of the previous stage where it expects it
+          - task: DownloadPipelineArtifact@2
+            displayName: '📥 Download the build'
+            inputs:
+              artifact: 'dist'
+              targetPath: '$(Build.SourcesDirectory)/dist'
+
+          # The Dockerfile serves dist/ with nginx, non-root, on port 8080
+          - task: Docker@2
+            displayName: '🐳 Build and push image'
+            inputs:
+              command: buildAndPush
+              containerRegistry: $(MFE_ORCHESTRATOR_REGISTRY_CONNECTION)
+              repository: $(MFE_ORCHESTRATOR_IMAGE_REPOSITORY)
+              Dockerfile: Dockerfile
+              buildContext: '.'
+              tags: $(VERSION)
+
+          # A host is a DOCKER frontend: the console learns about a version from this call.
+          # Pipeline values reach the script through env only: a $(…) macro pasted into the script
+          # body is substituted as text before bash runs, so a tag could inject shell
+          - script: |
+              IMAGE="${IMAGE_REPOSITORY}:${VERSION}"
+              if [ -n "$REGISTRY_HOST" ]; then
+                IMAGE="${REGISTRY_HOST}/${IMAGE}"
+              fi
+              curl --fail-with-body --show-error --silent -X POST \
+                -H "api-key: ${MFE_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "{\"image\":\"${IMAGE}\",\"commitSha\":\"${COMMIT_SHA}\"}" \
+                "${DOMAIN%/}/api/frontends/by-slug/%microfrontendSlug%/versions/${VERSION}"
+            displayName: '📝 Register version in MFE Orchestrator'
+            env:
+              MFE_API_KEY: $(FLIGHTROOM_API_KEY)
+              VERSION: $(VERSION)
+              IMAGE_REPOSITORY: $(MFE_ORCHESTRATOR_IMAGE_REPOSITORY)
+              REGISTRY_HOST: $(MFE_ORCHESTRATOR_REGISTRY_HOST_RESOLVED)
+              DOMAIN: $(MICROFRONTEND_ORCHESTRATOR_DOMAIN_RESOLVED)
+              COMMIT_SHA: $(Build.SourceVersion)

@@ -1,0 +1,74 @@
+# Needs the group (or project) CI/CD variable FLIGHTROOM_API_KEY, created by the console.
+stages:
+  - test
+  - build
+  - docker
+
+variables:
+  NODE_VERSION: "24"
+
+# pnpm comes from the packageManager field of package.json, through corepack
+.pnpm:
+  image: node:${NODE_VERSION}
+  cache:
+    key:
+      files:
+        - pnpm-lock.yaml
+    paths:
+      - .pnpm-store
+  before_script:
+    - corepack enable
+    - pnpm config set store-dir .pnpm-store
+    - pnpm install --frozen-lockfile
+
+build:
+  extends: .pnpm
+  stage: build
+  # The webpack host reads (DefinePlugin) MFE_BACKEND_URL, MFE_PROJECT_ID and the optional
+  # MFE_ENVIRONMENT at build time (see .env.example). Set them as project
+  # CI/CD variables: those win over the default below, which is this console.
+  variables:
+    MFE_BACKEND_URL: "%domain%/api"
+  script:
+    - pnpm run build
+    - echo "Build completed successfully"
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 7 days
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH =~ /^(main|develop|development)$/
+
+# The Dockerfile serves dist/ with nginx, non-root, on port 8080.
+# A host is a DOCKER frontend: the console learns about a version from the registration call.
+docker:
+  stage: docker
+  image: docker:29
+  services:
+    - docker:29-dind
+  needs:
+    - build
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    MICROFRONTEND_SLUG: "%microfrontendSlug%"
+    # Base URL of your orchestrator console. Set a project CI/CD variable of the
+    # same name to register versions on a different installation.
+    MICROFRONTEND_ORCHESTRATOR_DOMAIN: "%domain%"
+  before_script:
+    - apk add --no-cache curl
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  script:
+    - IMAGE="$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
+    - docker build -t "$IMAGE" .
+    - docker push "$IMAGE"
+    - DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE" | cut -d@ -f2)
+    - |
+      curl --fail-with-body --show-error --silent -X POST \
+        -H "api-key: ${FLIGHTROOM_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\"image\":\"${IMAGE}\",\"digest\":\"${DIGEST}\",\"commitSha\":\"${CI_COMMIT_SHA}\"}" \
+        "${MICROFRONTEND_ORCHESTRATOR_DOMAIN%/}/api/frontends/by-slug/${MICROFRONTEND_SLUG}/versions/${CI_COMMIT_TAG}"
+    - echo "registered ${MICROFRONTEND_SLUG} ${CI_COMMIT_TAG}"
+  rules:
+    - if: $CI_COMMIT_TAG
