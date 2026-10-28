@@ -12,6 +12,9 @@ on:
         type: string
         description: 'Version to release'
 
+permissions:
+  contents: read
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -39,11 +42,13 @@ jobs:
     - name: 🔍 Check the entry point
       run: test -f dist/parcel.js
 
+    # Secret FLIGHTROOM_API_KEY is created by the console in this repository.
+    # Variable MICROFRONTEND_ORCHESTRATOR_DOMAIN (optional) points the upload at another installation.
     - name: 🚀 Publish to MFE Orchestrator
       uses: mfe-orchestrator-hub/github-action@0.0.29
       with:
-        apikey: ${{ secrets.MICROFRONTEND_ORCHESTRATOR_API_KEY }}
-        microfrontend-slug: %microfrontendSlug%
+        apikey: ${{ secrets.FLIGHTROOM_API_KEY }}
+        microfrontend-slug: '%microfrontendSlug%'
         domain: ${{ vars.MICROFRONTEND_ORCHESTRATOR_DOMAIN || '%domain%' }}
         file-path: './dist'
         version: ${{ inputs.version || github.ref_name }}
